@@ -16,7 +16,9 @@ class LightControlApp extends StatelessWidget {
     return MaterialApp(
       title: 'Light Control App',
       theme: ThemeData(
-        colorScheme: .fromSeed(seedColor: const Color.fromARGB(255, 125, 220, 116)),
+        colorScheme: .fromSeed(
+          seedColor: const Color.fromARGB(255, 125, 220, 116),
+        ),
       ),
       home: const HomePage(title: 'Light Control'),
     );

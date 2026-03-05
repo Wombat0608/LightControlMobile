@@ -62,12 +62,38 @@ class _DevicePageState extends State<DevicePage> {
   Widget build(BuildContext context) {
     String pageTitle = widget.device == null
         ? "Новое устройство"
-        : "Устройство: ${widget.device!.name}";
+        : widget.device!.name;
 
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: Text(pageTitle),
+        actions: [
+          PopupMenuButton<String>(
+            icon: Icon(Icons.more_vert), // вертикальное троеточие
+            color: Colors.white,
+            elevation: 8,
+            shape: RoundedRectangleBorder(),
+            onSelected: (String result) {
+              // обработка
+            },
+            itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+              const PopupMenuItem<String>(
+                value: 'remove',
+                child: Text('Удалить устройство'),
+              ),
+              const PopupMenuItem<String>(
+                value: 'scan',
+                child: Text('Сканировать QR'),
+              ),
+              const PopupMenuDivider(),
+              const PopupMenuItem<String>(
+                value: 'settings',
+                child: Text('Настройки'),
+              ),
+            ],
+          ),
+        ],
       ),
       body: SafeArea(
         child: Padding(

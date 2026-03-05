@@ -7,7 +7,7 @@ import 'dart:io';
 import 'package:uuid/uuid.dart';
 import 'dart:convert';
 
-const int _DEFAULT_HTTP_TIMEOUT = 10; // Sec 
+const int _DEFAULT_HTTP_TIMEOUT = 10; // Sec
 
 class ErrorHandler {
   static String getFriendlyErrorMessage(dynamic error) {
@@ -32,6 +32,23 @@ class ErrorHandler {
   }
 }
 
+Stream<List<WiFiInfo>> getAvailableNetworksStream({
+  String host = '192.168.4.1',
+  int port = 80,
+}) {
+  final controller = StreamController<List<WiFiInfo>>();
+  getAvailableNetworks(host: host, port: port)
+      .then((networks) {
+        controller.add(networks);
+        controller.close();
+      })
+      .catchError((cause) {
+        controller.addError(cause);
+        controller.close();
+      });
+  return controller.stream;
+}
+
 Future<List<WiFiInfo>> getAvailableNetworks({
   String host = '192.168.4.1',
   int port = 80,
@@ -50,10 +67,9 @@ Future<List<WiFiInfo>> getAvailableNetworks({
   if (response.statusCode == 200) {
     final List<dynamic> jsonList = jsonDecode(response.body);
     return jsonList.map((json) => WiFiInfo.fromMap(json)).toList();
-  } else if(response.statusCode == 404) {
+  } else if (response.statusCode == 404) {
     return [];
-  } 
-  else {
+  } else {
     throw Exception('Невозможно подключиться к устройству.');
   }
 }
