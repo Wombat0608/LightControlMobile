@@ -12,6 +12,25 @@ class DeviceNetworksPage extends StatefulWidget {
 }
 
 class _DeviceNetworksPageState extends State<DeviceNetworksPage> {
+  late NetworksList _networksList;
+
+  @override
+  void initState() {
+    super.initState();
+    // Создаем виджет ОДИН РАЗ в initState
+    _networksList = NetworksList(device: widget.device);
+  }
+
+  @override
+  void didUpdateWidget(DeviceNetworksPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Если устройство изменилось, обновляем список
+    if (oldWidget.device.host != widget.device.host ||
+        oldWidget.device.port != widget.device.port) {
+      _networksList = NetworksList(device: widget.device);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -19,9 +38,10 @@ class _DeviceNetworksPageState extends State<DeviceNetworksPage> {
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: Text(widget.device.name),
       ),
-      body: Center(child: NetworksList(device: widget.device)),
+      body: Center(child: _networksList),
       floatingActionButton: FloatingActionButton(
         onPressed: () {
+          _networksList.refresh();
         },
         tooltip: 'Refresh list...',
         child: const Icon(Icons.refresh),

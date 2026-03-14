@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:light_control/core/client/device_adapter.dart';
 import 'package:light_control/core/models/device.dart';
+import 'package:light_control/core/models/device_settings.dart';
 import 'package:light_control/core/persistence/device_repository.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'device_page.dart';
 import 'device_networks_page.dart';
+import 'dart:async';
 
 class DeviceList extends StatefulWidget {
   const DeviceList({super.key});
@@ -12,8 +15,22 @@ class DeviceList extends StatefulWidget {
   State<DeviceList> createState() => _DeviceListState();
 }
 
+class DeviceSettingsCache {
+  final DeviceSettings? deviceSettings;
+  final DateTime lastUpdated;
+  bool loaded;
+
+  DeviceSettingsCache({
+    this.deviceSettings,
+    required this.lastUpdated,
+    this.loaded = true,
+  });
+}
+
 class _DeviceListState extends State<DeviceList> {
   String? _selectedDeviceId;
+  final Map<String, DeviceSettingsCache> _deviceSettings = {};
+  Timer? _refreshTimer;
 
   @override
   void initState() {
@@ -21,6 +38,56 @@ class _DeviceListState extends State<DeviceList> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       DeviceRepository.instance.loadDevices();
     });
+
+    _startPeriodicRefresh();
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startPeriodicRefresh() {
+    _refreshTimer?.cancel();
+    _refreshTimer = Timer.periodic(const Duration(minutes: 4), (timer) {
+      _refreshAllDevices();
+    });
+  }
+
+  Future<void> _refreshAllDevices() async {
+    final devices = await DeviceRepository.instance.devicesStream.first;
+    for (var device in devices) {
+      _refreshDeviceData(device.id, device.host);
+    }
+  }
+
+  Future<void> _refreshDeviceData(String deviceId, String deviceHost) async {
+    try {
+      final settings = await Future.wait([
+        getDeviceSettings(host: deviceHost),
+      ]).timeout(const Duration(seconds: 5));
+
+      if (mounted) {
+        setState(() {
+          _deviceSettings[deviceId] = DeviceSettingsCache(
+            deviceSettings: settings[0] as DeviceSettings,
+            lastUpdated: DateTime.now(),
+          );
+        });
+      }
+    } catch (e) {
+      print('Ошибка обновления устройства $deviceId: $e');
+
+      if (mounted) {
+        setState(() {
+          _deviceSettings[deviceId] = DeviceSettingsCache(
+            lastUpdated: DateTime.now(),
+            loaded: false
+          );
+        });
+      }
+    }
   }
 
   @override
@@ -38,43 +105,92 @@ class _DeviceListState extends State<DeviceList> {
           itemBuilder: (context, index) {
             final device = devices[index];
             final isSelected = _selectedDeviceId == device.id;
-
-            return ListTile(
-              leading: SvgPicture.asset('assets/icons/light.svg'),
-              title: Text(device.name),
-              subtitle: Text(device.host),
-              selected: isSelected,
-              selectedTileColor: Theme.of(
-                context,
-              ).primaryColor.withOpacity(0.2),
-              onTap: () {
-                setState(() {
-                  if (_selectedDeviceId == device.id) {
-                    _selectedDeviceId = null; // снять выделение
-                  } else {
-                    _selectedDeviceId = device.id; // выделить новое
-                  }
-                });
-              },
-              // Добавляем trailing меню
-              trailing: PopupMenuButton(
-                icon: Icon(Icons.more_vert),
-                onSelected: (value) => _handleMenu(context, device, value),
-                itemBuilder: (context) => [
-                  PopupMenuItem(value: 'edit', child: Text('Редактировать')),
-                  PopupMenuItem(value: 'delete', child: Text('Удалить')),
-                  PopupMenuItem(
-                    value: 'network',
-                    child: Text('Настроить Wi-Fi'),
-                  ),
-                ],
-              ),
-            );
+            return _buildDeviceTile(device, isSelected);
           },
         );
       },
     );
   }
+
+  Widget _buildDeviceTile(Device device, bool isSelected) {
+    // Проверяем кэш
+    final cachedData = _deviceSettings[device.id];
+    final needsRefresh =
+        cachedData == null || !cachedData.loaded ||
+        DateTime.now().difference(cachedData.lastUpdated) >
+            const Duration(minutes: 2);
+
+    if (needsRefresh) {
+      // Запускаем обновление в фоне, не блокируя отрисовку
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _refreshDeviceData(device.id, device.host);
+      });
+    }
+
+    return ListTile(
+      leading: Stack(
+        children: [
+          SvgPicture.asset('assets/icons/light.svg'),
+          Positioned(
+            bottom: 0,
+            right: 0,
+            child: _buildStatusIndicator(device, cachedData),
+          ),
+        ],
+      ),
+      title: Row(
+        children: [
+          Expanded(child: Text(device.name)),
+          if (cachedData?.deviceSettings != null)
+            Icon(Icons.settings_applications, size: 16, color: Colors.grey),
+        ],
+      ),
+      subtitle: Text(device.host),
+      selected: isSelected,
+      selectedTileColor: Theme.of(context).primaryColor.withOpacity(0.2),
+      onTap: () {
+        setState(() {
+          if (_selectedDeviceId == device.id) {
+            _selectedDeviceId = null;
+          } else {
+            _selectedDeviceId = device.id;
+          }
+        });
+      },
+      trailing: PopupMenuButton(
+        icon: const Icon(Icons.more_vert),
+        onSelected: (value) => _handleMenu(context, device, value),
+        itemBuilder: (context) => [
+          const PopupMenuItem(value: 'edit', child: Text('Редактировать')),
+          const PopupMenuItem(value: 'delete', child: Text('Удалить')),
+          const PopupMenuItem(value: 'network', child: Text('Настроить Wi-Fi')),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusIndicator(Device device, DeviceSettingsCache? cachedData) {
+    if (cachedData == null) {
+      // Нет данных - показываем загрузку только при первом запросе
+      return const SizedBox(
+        width: 16,
+        height: 16,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      );
+    }
+
+    // Используем кэшированные данные
+    return Container(
+      width: 16,
+      height: 16,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: cachedData.loaded ? Colors.green : Colors.grey,
+      ),
+    );
+  }
+
+  // Остальные методы (_handleMenu, _showDeleteDialog) остаются без изменений
 
   void _handleMenu(BuildContext context, Device device, String value) {
     switch (value) {
@@ -90,7 +206,9 @@ class _DeviceListState extends State<DeviceList> {
       case 'network':
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (context) => DeviceNetworksPage(device: device)),
+          MaterialPageRoute(
+            builder: (context) => DeviceNetworksPage(device: device),
+          ),
         );
         break;
     }

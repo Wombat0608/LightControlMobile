@@ -1,13 +1,14 @@
 import 'package:http/http.dart' as http;
 import 'package:light_control/core/models/device.dart';
 import 'package:light_control/core/models/wi_fi_info.dart';
+import 'package:light_control/core/models/device_settings.dart';
 import 'package:sprintf/sprintf.dart';
 import 'dart:async';
 import 'dart:io';
 import 'package:uuid/uuid.dart';
 import 'dart:convert';
 
-const int _DEFAULT_HTTP_TIMEOUT = 10; // Sec
+const int _defaultHTTPTimeout = 10; // Sec
 
 class ErrorHandler {
   static String getFriendlyErrorMessage(dynamic error) {
@@ -59,14 +60,24 @@ Future<List<WiFiInfo>> getAvailableNetworks({
   final response = await http
       .get(uri)
       .timeout(
-        const Duration(seconds: _DEFAULT_HTTP_TIMEOUT), // Тайм-аут 10 секунд
+        const Duration(seconds: _defaultHTTPTimeout), // Тайм-аут 10 секунд
         onTimeout: () {
           throw TimeoutException('Запрос занял слишком много времени');
         },
       );
   if (response.statusCode == 200) {
     final List<dynamic> jsonList = jsonDecode(response.body);
-    return jsonList.map((json) => WiFiInfo.fromMap(json)).toList();
+    List<WiFiInfo> rs = jsonList.map((json) => WiFiInfo.fromMap(json)).toList();
+    Map<String, WiFiInfo> index = {};
+    for (WiFiInfo n in rs) {
+      WiFiInfo? e = index[n.ssid];
+      if (e != null && n.rssi > e.rssi) {
+        index[n.ssid] = n;
+      } else {
+        index[n.ssid] = n;
+      }
+    }
+    return index.values.toList();
   } else if (response.statusCode == 404) {
     return [];
   } else {
@@ -84,7 +95,7 @@ Future<Device> getDeviceDefinition({
   final response = await http
       .get(uri)
       .timeout(
-        const Duration(seconds: _DEFAULT_HTTP_TIMEOUT), // Тайм-аут 10 секунд
+        const Duration(seconds: _defaultHTTPTimeout), // Тайм-аут 10 секунд
         onTimeout: () {
           throw TimeoutException('Запрос занял слишком много времени');
         },
@@ -96,6 +107,32 @@ Future<Device> getDeviceDefinition({
       host: host,
     );
     return d;
+  } else {
+    throw Exception('Невозможно подключиться к устройству.');
+  }
+}
+
+Future<DeviceSettings> getDeviceSettings({
+  String host = '192.168.4.1',
+  int port = 80,
+}) async {
+  final Uri uri = Uri.parse(
+    sprintf('http://%s:%d/settings', [host, port]).toString(),
+  );
+  final response = await http
+      .get(uri)
+      .timeout(
+        const Duration(seconds: _defaultHTTPTimeout), // Тайм-аут 10 секунд
+        onTimeout: () {
+          throw TimeoutException('Запрос занял слишком много времени');
+        },
+      );
+  if (response.statusCode == 200) {
+    DeviceSettings settings = DeviceSettings();
+    if (settings.parse(response.body, 0) == -1) {
+      throw Exception('Формат настроек некорректен.');
+    }
+    return settings;
   } else {
     throw Exception('Невозможно подключиться к устройству.');
   }

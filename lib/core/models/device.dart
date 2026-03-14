@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import 'device_settings.dart';
 
 class Device extends Equatable {
   final String id;
@@ -11,6 +12,7 @@ class Device extends Equatable {
     required this.name,
     required this.host,
     this.port = 80,
+
   });
 
   @override

@@ -235,6 +235,8 @@ class _DevicePageState extends State<DevicePage> {
     });
     try {
       device = await getDeviceDefinition(host: ipController.text);
+      var deviceSettings = await getDeviceSettings(host: ipController.text);
+      
       if (!mounted) return;
       nameController.text = device!.name;
       setState(() {

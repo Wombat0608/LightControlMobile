@@ -5,48 +5,87 @@ import '../../core/client/device_adapter.dart';
 
 class NetworksList extends StatefulWidget {
   final Device device;
-  NetworksList({super.key, required this.device});
+
+  NetworksList({super.key, required this.device}) {}
 
   @override
   State<NetworksList> createState() => _NetworksListState();
+
+  void refresh() {
+    final state = _NetworksListState._instance;
+    state?._refreshNetworks();
+  }
 }
 
 class _NetworksListState extends State<NetworksList> {
+  static _NetworksListState? _instance;
   String? _selectedNetwork;
-  late Stream<List<WiFiInfo>> _networksStream;
-  bool _isLoading = true;
+  Stream<List<WiFiInfo>>? _networksStream;
+  bool _isLoading = false;
   String? _error;
 
+  @override
+  void initState() {
+    super.initState();
+    _instance = this;
+    _initStream();
+  }
+
+  @override
+  void didUpdateWidget(NetworksList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Если изменился host или port, обновляем стрим
+    if (oldWidget.device.host != widget.device.host ||
+        oldWidget.device.port != widget.device.port) {
+      _refreshNetworks();
+    }
+  }
+
   void _initStream() {
+    _refreshNetworks();
+  }
+
+  Future<void> _refreshNetworks() async {
+    // Предотвращаем множественные вызовы
+    if (_isLoading) return;
+
     setState(() {
       _isLoading = true;
       _error = null;
     });
 
     try {
-      // Сохраняем стрим в переменную
+      // Создаем новый стрим
       _networksStream = getAvailableNetworksStream(
         host: widget.device.host,
         port: widget.device.port,
       );
+
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     } catch (cause) {
-      setState(() {
-        _error = cause.toString();
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _error = cause.toString();
+          _isLoading = false;
+        });
+      }
     }
   }
 
   @override
-  void initState() {
-    super.initState();
-    _initStream();
-  }
-
-@override
   Widget build(BuildContext context) {
+    // Если есть ошибка - показываем сообщение об ошибке
     if (_error != null) {
       return _buildError();
+    }
+
+    // Если стрим еще не создан или идет загрузка
+    if (_networksStream == null || _isLoading) {
+      return _buildLoading();
     }
 
     return StreamBuilder<List<WiFiInfo>>(
@@ -58,13 +97,13 @@ class _NetworksListState extends State<NetworksList> {
         }
 
         // Показываем загрузку пока нет данных
-        if (!snapshot.hasData) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
           return _buildLoading();
         }
 
         // Если данные есть - показываем список
-        final networks = snapshot.data!;
-        
+        final networks = snapshot.data ?? [];
+
         if (networks.isEmpty) {
           return _buildEmpty();
         }
@@ -99,11 +138,7 @@ class _NetworksListState extends State<NetworksList> {
           Text(_error ?? 'Неизвестная ошибка'),
           const SizedBox(height: 16),
           ElevatedButton(
-            onPressed: () {
-              setState(() {
-                _initStream();
-              });
-            },
+            onPressed: _refreshNetworks,
             child: const Text('Повторить'),
           ),
         ],
@@ -127,11 +162,7 @@ class _NetworksListState extends State<NetworksList> {
           ),
           const SizedBox(height: 16),
           ElevatedButton(
-            onPressed: () {
-              setState(() {
-                _initStream();
-              });
-            },
+            onPressed: _refreshNetworks,
             child: const Text('Повторить'),
           ),
         ],
@@ -156,15 +187,14 @@ class _NetworksListState extends State<NetworksList> {
   }
 
   Widget _buildList(List<WiFiInfo> networks) {
-    return ListView.builder(
-      itemCount: networks.length,
-      itemBuilder: (context, index) {
-        final network = networks[index];
-        final isSelected = _selectedNetwork == network.ssid;
-
-        return Card(
-          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-          child: ListTile(
+    return RefreshIndicator(
+      onRefresh: _refreshNetworks,
+      child: ListView.builder(
+        itemCount: networks.length,
+        itemBuilder: (context, index) {
+          final network = networks[index];
+          final isSelected = _selectedNetwork == network.ssid;
+          return ListTile(
             leading: _buildSignalIcon(network.rssi, isSelected),
             title: Text(
               network.ssid,
@@ -176,13 +206,7 @@ class _NetworksListState extends State<NetworksList> {
             subtitle: Text('Сигнал: ${network.rssi} dBm'),
             trailing: _buildSecurityIcon(network.encType),
             selected: isSelected,
-            selectedTileColor: Theme.of(context).primaryColor.withOpacity(0.1),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-              side: isSelected
-                  ? BorderSide(color: Theme.of(context).primaryColor)
-                  : BorderSide.none,
-            ),
+            selectedTileColor: Theme.of(context).primaryColor.withOpacity(0.2),
             onTap: () {
               setState(() {
                 if (_selectedNetwork == network.ssid) {
@@ -190,11 +214,12 @@ class _NetworksListState extends State<NetworksList> {
                 } else {
                   _selectedNetwork = network.ssid;
                 }
+                _showPasswordSheet(network);
               });
             },
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 
@@ -213,17 +238,17 @@ class _NetworksListState extends State<NetworksList> {
         return Icons.wifi_2_bar;
       case 3:
       case 4:
-        return Icons.signal_wifi_4_bar;
+        return Icons.wifi;
       default:
-        return Icons.signal_wifi_0_bar;
+        return Icons.wifi_off;
     }
   }
 
   int _getSignalBars(int rssi) {
-    if (rssi >= 100) return 4;
-    if (rssi >= 80) return 1;
-    if (rssi >= 70) return 2;
-    if (rssi >= 60) return 3;
+    if (rssi >= -50) return 4;
+    if (rssi >= -60) return 3;
+    if (rssi >= -70) return 2;
+    if (rssi >= -80) return 1;
     return 0;
   }
 
@@ -239,6 +264,7 @@ class _NetworksListState extends State<NetworksList> {
       case 1:
       case 2:
       case 3:
+      case 4:
         icon = Icons.lock;
         color = Colors.orange;
         break;
@@ -248,5 +274,170 @@ class _NetworksListState extends State<NetworksList> {
     }
 
     return Icon(icon, color: color, size: 18);
+  }
+
+  Future<void> _showPasswordSheet(WiFiInfo network) async {
+    final passwordController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true, // чтобы поднималось вместе с клавиатурой
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(
+            context,
+          ).viewInsets.bottom, // отступ для клавиатуры
+          left: 16,
+          right: 16,
+          top: 16,
+        ),
+        child: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Заголовок
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Подключение к сети',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 8),
+
+              // Название сети
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    _buildSignalIcon(network.rssi, false),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            network.ssid,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              Icon(
+                                network.encType == 0
+                                    ? Icons.lock_open
+                                    : Icons.lock,
+                                size: 14,
+                                color: network.encType == 0
+                                    ? Colors.green
+                                    : Colors.orange,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                network.encType == 0
+                                    ? 'Открытая сеть'
+                                    : 'Защищенная сеть',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: network.encType == 0
+                                      ? Colors.green
+                                      : Colors.orange,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // Поле ввода пароля (только для защищенных сетей)
+              if (network.encType != 0) ...[
+                TextFormField(
+                  controller: passwordController,
+                  obscureText: true,
+                  decoration: InputDecoration(
+                    labelText: 'Пароль',
+                    hintText: 'Введите пароль сети',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    prefixIcon: const Icon(Icons.key),
+                  ),
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Введите пароль';
+                    }
+                    if (value.length < 8) {
+                      return 'Пароль должен быть не менее 8 символов';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+              ],
+
+              // Кнопка подключения
+              SizedBox(
+                height: 50,
+                child: ElevatedButton(
+                  onPressed: () async {
+                    // Для открытой сети проверка не нужна
+                    if (network.encType == 0) {
+                      Navigator.pop(context, ''); // пустой пароль
+                    } else {
+                      if (formKey.currentState!.validate()) {
+                        Navigator.pop(context, passwordController.text);
+                      }
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 50),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: Text(
+                    network.encType == 0
+                        ? 'Подключиться'
+                        : 'Подключиться с паролем',
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    // Обработка результата
+    if (result != null) {
+      // _connectToNetwork(network, result);
+    }
   }
 }
