@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:light_control/core/models/device_settings.dart';
 import '../../core/models/device.dart';
 import 'networks_list_widget.dart';
 
 class DeviceNetworksPage extends StatefulWidget {
   final Device device;
+  final DeviceSettings? deviceSettings;
 
-  const DeviceNetworksPage({super.key, required this.device});
+  const DeviceNetworksPage({
+    super.key,
+    required this.device,
+    this.deviceSettings,
+  });
 
   @override
   State<StatefulWidget> createState() => _DeviceNetworksPageState();
@@ -17,8 +23,7 @@ class _DeviceNetworksPageState extends State<DeviceNetworksPage> {
   @override
   void initState() {
     super.initState();
-    // Создаем виджет ОДИН РАЗ в initState
-    _networksList = NetworksList(device: widget.device);
+    _networksList = NetworksList(device: widget.device, deviceSettings: widget.deviceSettings,);
   }
 
   @override
@@ -27,7 +32,7 @@ class _DeviceNetworksPageState extends State<DeviceNetworksPage> {
     // Если устройство изменилось, обновляем список
     if (oldWidget.device.host != widget.device.host ||
         oldWidget.device.port != widget.device.port) {
-      _networksList = NetworksList(device: widget.device);
+      _networksList = NetworksList(device: widget.device, deviceSettings: widget.deviceSettings,);
     }
   }
 
@@ -43,7 +48,7 @@ class _DeviceNetworksPageState extends State<DeviceNetworksPage> {
         onPressed: () {
           _networksList.refresh();
         },
-        tooltip: 'Refresh list...',
+        tooltip: 'Обновить список...',
         child: const Icon(Icons.refresh),
       ),
     );

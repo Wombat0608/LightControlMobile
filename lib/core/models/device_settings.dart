@@ -1,5 +1,10 @@
 extension IntFormatting on int {
-  String toDigits(int width) => toString().padLeft(width, '0');
+  String toDigits(int width) {
+    final isNegative = this < 0;
+    final absoluteValue = this.abs();
+    final formatted = absoluteValue.toString().padLeft(width - (isNegative ? 1 : 0), '0');
+    return isNegative ? '-$formatted' : formatted;
+  }
 }
 
 ({int nextPosition, int result}) cutInt(String input, int start, int length) {
@@ -93,6 +98,35 @@ class Network {
     this.subnet,
   });
 
+  void skipAddress() {
+    address = [-1, -1, -1, -1];
+  }
+
+  void skipGateway() {
+    gateway = [-1, -1, -1, -1];
+  }
+
+  void skipSubnet() {
+    subnet = [-1, -1, -1, -1];
+  }
+
+  List<int> _parseIPAddress(String ipAddress) {
+    List<String> octets = ipAddress.split("\\.");
+    return octets.map((e) => int.tryParse(e) ?? -1).toList();
+  }
+
+  void setAddress(String address) {
+    this.address = _parseIPAddress(address);
+  }
+
+  void setGateway(String gateway) {
+    this.gateway = _parseIPAddress(gateway);
+  }
+
+  void setSubnet(String subnet) {
+    this.subnet = _parseIPAddress(subnet);
+  }
+
   @override
   String toString() {
     return '${address![0].toDigits(3)}${address![1].toDigits(3)}${address![2].toDigits(3)}${address![3].toDigits(3)}'
@@ -164,7 +198,7 @@ class NTP {
   @override
   String toString() {
     return '${ntpAddress![0].toDigits(3)}${ntpAddress![1].toDigits(3)}${ntpAddress![2].toDigits(3)}${ntpAddress![3].toDigits(3)}'
-        '${ntpPort!.toDigits(4)}${gmtOffsetMn.toDigits(3)}${gmtOffsetHr.toDigits(3)}${ntpHost.length.toDigits(2)}$ntpHost';
+        '${ntpPort!.toDigits(4)}${gmtOffsetMn.toDigits(4)}${gmtOffsetHr.toDigits(3)}${ntpHost.length.toDigits(2)}$ntpHost';
   }
 
   int parse(String input, int start) {
@@ -183,7 +217,7 @@ class NTP {
     pos = result1.nextPosition;
     ntpPort = result1.result;
 
-    result1 = cutInt(input, pos, 3);
+    result1 = cutInt(input, pos, 4);
     if (result1.nextPosition < 0) {
       return -1;
     }

@@ -112,13 +112,38 @@ Future<Device> getDeviceDefinition({
   }
 }
 
+Future<void> postDeviceSettings({
+  String host = '192.168.4.1',
+  int port = 80,
+  required DeviceSettings deviceSettings,
+}) async {
+  try {
+    final Uri uri = Uri.parse('http://$host:$port/settings');
+    String requestBody = deviceSettings.toString();
+    final response = await http
+        .post(uri, body: requestBody)
+        .timeout(
+          const Duration(seconds: _defaultHTTPTimeout), // Тайм-аут 10 секунд
+        );
+    if (response.statusCode != 200) {
+      throw Exception(
+        'Ошибка сервера: ${response.statusCode} - ${response.body}',
+      );
+    }
+  } on TimeoutException catch (_) {
+    throw Exception('Превышено время ожидания ответа от устройства');
+  } on SocketException catch (_) {
+    throw Exception('Устройство недоступно в сети');
+  } catch (e) {
+    throw Exception('Ошибка при отправке настроек: $e');
+  }
+}
+
 Future<DeviceSettings> getDeviceSettings({
   String host = '192.168.4.1',
   int port = 80,
 }) async {
-  final Uri uri = Uri.parse(
-    sprintf('http://%s:%d/settings', [host, port]).toString(),
-  );
+  final Uri uri = Uri.parse('http://$host:$port/settings');
   final response = await http
       .get(uri)
       .timeout(

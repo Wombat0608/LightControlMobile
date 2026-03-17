@@ -1,5 +1,4 @@
 import 'package:equatable/equatable.dart';
-import 'device_settings.dart';
 
 class Device extends Equatable {
   final String id;

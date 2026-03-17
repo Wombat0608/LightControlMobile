@@ -83,7 +83,7 @@ class _DeviceListState extends State<DeviceList> {
         setState(() {
           _deviceSettings[deviceId] = DeviceSettingsCache(
             lastUpdated: DateTime.now(),
-            loaded: false
+            loaded: false,
           );
         });
       }
@@ -116,7 +116,8 @@ class _DeviceListState extends State<DeviceList> {
     // Проверяем кэш
     final cachedData = _deviceSettings[device.id];
     final needsRefresh =
-        cachedData == null || !cachedData.loaded ||
+        cachedData == null ||
+        !cachedData.loaded ||
         DateTime.now().difference(cachedData.lastUpdated) >
             const Duration(minutes: 2);
 
@@ -126,6 +127,10 @@ class _DeviceListState extends State<DeviceList> {
         _refreshDeviceData(device.id, device.host);
       });
     }
+
+    final bool settingsInit =
+        _deviceSettings[device.id] != null &&
+        _deviceSettings[device.id]?.loaded == true;
 
     return ListTile(
       leading: Stack(
@@ -163,7 +168,11 @@ class _DeviceListState extends State<DeviceList> {
         itemBuilder: (context) => [
           const PopupMenuItem(value: 'edit', child: Text('Редактировать')),
           const PopupMenuItem(value: 'delete', child: Text('Удалить')),
-          const PopupMenuItem(value: 'network', child: Text('Настроить Wi-Fi')),
+          PopupMenuItem(
+            value: 'network',
+            enabled: settingsInit,
+            child: Text('Настроить Wi-Fi'),
+          ),
         ],
       ),
     );
@@ -204,12 +213,18 @@ class _DeviceListState extends State<DeviceList> {
         _showDeleteDialog(context, device);
         break;
       case 'network':
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => DeviceNetworksPage(device: device),
-          ),
-        );
+        if (_deviceSettings[device.id]?.deviceSettings != null) {
+          final settings = _deviceSettings[device.id]!.deviceSettings;
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => DeviceNetworksPage(
+                device: device,
+                deviceSettings: settings,
+              ),
+            ),
+          );
+        }
         break;
     }
   }

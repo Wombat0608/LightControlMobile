@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:light_control/core/models/device.dart';
 import 'package:light_control/core/models/wi_fi_info.dart';
 import '../../core/client/device_adapter.dart';
+import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
+import 'package:light_control/core/models/device_settings.dart';
 
 class NetworksList extends StatefulWidget {
   final Device device;
+  final DeviceSettings? deviceSettings;
 
-  NetworksList({super.key, required this.device}) {}
+  NetworksList({super.key, required this.device, this.deviceSettings}) {}
 
   @override
   State<NetworksList> createState() => _NetworksListState();
@@ -23,12 +26,19 @@ class _NetworksListState extends State<NetworksList> {
   Stream<List<WiFiInfo>>? _networksStream;
   bool _isLoading = false;
   String? _error;
+  late final _ipMaskFormatter;
 
   @override
   void initState() {
     super.initState();
     _instance = this;
     _initStream();
+
+    _ipMaskFormatter = MaskTextInputFormatter(
+      mask: '###.###.###.###',
+      filter: {"#": RegExp(r'[0-9]')},
+      type: MaskAutoCompletionType.lazy,
+    );
   }
 
   @override
@@ -195,15 +205,23 @@ class _NetworksListState extends State<NetworksList> {
           final network = networks[index];
           final isSelected = _selectedNetwork == network.ssid;
           return ListTile(
-            leading: _buildSignalIcon(network.rssi, isSelected),
+            leading: _buildSignalIcon(
+              network.rssi,
+              isSelected,
+              networks[index].connected,
+            ),
             title: Text(
               network.ssid,
               style: TextStyle(
                 fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                color: isSelected ? Theme.of(context).primaryColor : null,
+                color: networks[index].connected
+                    ? Colors.blue
+                    : (isSelected ? Theme.of(context).primaryColor : null),
               ),
             ),
-            subtitle: Text('Сигнал: ${network.rssi} dBm'),
+            subtitle: Text(
+              '${networks[index].connected ? "Подключено, " : ""}Сигнал: ${network.rssi} dBm',
+            ),
             trailing: _buildSecurityIcon(network.encType),
             selected: isSelected,
             selectedTileColor: Theme.of(context).primaryColor.withOpacity(0.2),
@@ -223,10 +241,11 @@ class _NetworksListState extends State<NetworksList> {
     );
   }
 
-  Widget _buildSignalIcon(int rssi, bool isSelected) {
+  Widget _buildSignalIcon(int rssi, bool isSelected, bool connected) {
     int bars = _getSignalBars(rssi);
-    Color color = isSelected ? Theme.of(context).primaryColor : Colors.grey;
-
+    Color color = connected
+        ? Colors.blue
+        : (isSelected ? Theme.of(context).primaryColor : Colors.grey);
     return Icon(_getSignalIcon(bars), color: color);
   }
 
@@ -280,164 +299,408 @@ class _NetworksListState extends State<NetworksList> {
     final passwordController = TextEditingController();
     final formKey = GlobalKey<FormState>();
 
-    final result = await showModalBottomSheet<String>(
+    // Эти переменные должны быть внутри билдера или захвачены из замыкания
+    String ipType = 'dhcp';
+    final ipController = TextEditingController();
+    final gatewayController = TextEditingController();
+    final subnetController = TextEditingController();
+
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
-      isScrollControlled: true, // чтобы поднималось вместе с клавиатурой
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(
-            context,
-          ).viewInsets.bottom, // отступ для клавиатуры
-          left: 16,
-          right: 16,
-          top: 16,
-        ),
-        child: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Заголовок
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Подключение к сети',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ],
+      builder: (context) {
+        // Используем StatefulBuilder для внутреннего состояния
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom,
+                left: 16,
+                right: 16,
+                top: 16,
               ),
-
-              const SizedBox(height: 8),
-
-              // Название сети
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  children: [
-                    _buildSignalIcon(network.rssi, false),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+              child: SingleChildScrollView(
+                child: Form(
+                  key: formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Заголовок
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
-                            network.ssid,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
+                            'Подключение к сети',
+                            style: Theme.of(context).textTheme.titleLarge,
                           ),
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              Icon(
-                                network.encType == 0
-                                    ? Icons.lock_open
-                                    : Icons.lock,
-                                size: 14,
-                                color: network.encType == 0
-                                    ? Colors.green
-                                    : Colors.orange,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                network.encType == 0
-                                    ? 'Открытая сеть'
-                                    : 'Защищенная сеть',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: network.encType == 0
-                                      ? Colors.green
-                                      : Colors.orange,
-                                ),
-                              ),
-                            ],
+                          IconButton(
+                            icon: const Icon(Icons.close),
+                            onPressed: () => Navigator.pop(context),
                           ),
                         ],
                       ),
-                    ),
-                  ],
+
+                      const SizedBox(height: 8),
+
+                      // Название сети
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            _buildSignalIcon(
+                              network.rssi,
+                              false,
+                              network.connected,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    network.ssid,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16,
+                                      color: network.connected
+                                          ? Colors.blue
+                                          : null,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        network.encType == 0
+                                            ? Icons.lock_open
+                                            : Icons.lock,
+                                        size: 14,
+                                        color: network.encType == 0
+                                            ? Colors.green
+                                            : Colors.orange,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        network.encType == 0
+                                            ? 'Открытая сеть'
+                                            : 'Защищенная сеть',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: network.encType == 0
+                                              ? Colors.green
+                                              : Colors.orange,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // Поле ввода пароля (только для защищенных сетей)
+                      if (network.encType != 0) ...[
+                        TextFormField(
+                          controller: passwordController,
+                          obscureText: true,
+                          decoration: InputDecoration(
+                            labelText: 'Пароль',
+                            hintText: 'Введите пароль сети',
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            prefixIcon: const Icon(Icons.key),
+                          ),
+                          validator: (value) {
+                            if (value == null || value.isEmpty) {
+                              return 'Введите пароль';
+                            }
+                            if (value.length < 8) {
+                              return 'Пароль должен быть не менее 8 символов';
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+
+                      // Используем value вместо initialValue
+                      DropdownButtonFormField<String>(
+                        initialValue: ipType,
+                        decoration: InputDecoration(
+                          labelText: 'Настройки IP',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          prefixIcon: const Icon(Icons.settings_ethernet),
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'dhcp',
+                            child: Row(
+                              children: [
+                                SizedBox(width: 8),
+                                Text('DHCP (автоматически)'),
+                              ],
+                            ),
+                          ),
+                          DropdownMenuItem(
+                            value: 'static',
+                            child: Row(
+                              children: [
+                                SizedBox(width: 8),
+                                Text('Статический IP (вручную)'),
+                              ],
+                            ),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() {
+                              ipType = value;
+                            });
+                          }
+                        },
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // Поля для статического IP
+                      if (ipType == 'static') ...[
+                        TextFormField(
+                          inputFormatters: [_ipMaskFormatter],
+                          controller: ipController,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: false,
+                          ),
+                          decoration: InputDecoration(
+                            labelText: 'IP-адрес',
+                            hintText: '192.168.1.100',
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          validator: (value) {
+                            if (ipType == 'static') {
+                              if (value == null || value.isEmpty) {
+                                return 'Введите IP-адрес';
+                              }
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          inputFormatters: [_ipMaskFormatter],
+                          controller: gatewayController,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: false,
+                          ),
+                          decoration: InputDecoration(
+                            labelText: 'Шлюз',
+                            hintText: '192.168.1.1',
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          validator: (value) {
+                            if (ipType == 'static') {
+                              if (value == null || value.isEmpty) {
+                                return 'Введите адрес шлюза';
+                              }
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          inputFormatters: [_ipMaskFormatter],
+                          controller: subnetController,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: false,
+                          ),
+                          decoration: InputDecoration(
+                            labelText: 'Маска подсети',
+                            hintText: '255.255.255.0',
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          validator: (value) {
+                            if (ipType == 'static') {
+                              if (value == null || value.isEmpty) {
+                                return 'Введите маску подсети';
+                              }
+                            }
+                            return null;
+                          },
+                        ),
+                      ],
+
+                      const SizedBox(height: 16),
+
+                      // Кнопка подключения
+                      SizedBox(
+                        height: 50,
+                        child: ElevatedButton(
+                          onPressed: () async {
+                            if (formKey.currentState!.validate()) {
+                              // Собираем все данные в Map
+                              final connectionData = <String, dynamic>{
+                                'password': network.encType == 0
+                                    ? ''
+                                    : passwordController.text,
+                                'ipType': ipType,
+                              };
+
+                              if (ipType == 'static') {
+                                connectionData['ip'] = ipController.text;
+                                connectionData['gateway'] =
+                                    gatewayController.text;
+                                connectionData['subnet'] =
+                                    subnetController.text;
+                              }
+
+                              Navigator.pop(context, connectionData);
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            minimumSize: const Size(double.infinity, 50),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          child: Text(
+                            network.encType == 0
+                                ? 'Подключиться'
+                                : 'Подключиться с паролем',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                  ),
                 ),
               ),
-
-              const SizedBox(height: 16),
-
-              // Поле ввода пароля (только для защищенных сетей)
-              if (network.encType != 0) ...[
-                TextFormField(
-                  controller: passwordController,
-                  obscureText: true,
-                  decoration: InputDecoration(
-                    labelText: 'Пароль',
-                    hintText: 'Введите пароль сети',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    prefixIcon: const Icon(Icons.key),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Введите пароль';
-                    }
-                    if (value.length < 8) {
-                      return 'Пароль должен быть не менее 8 символов';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
-              ],
-
-              // Кнопка подключения
-              SizedBox(
-                height: 50,
-                child: ElevatedButton(
-                  onPressed: () async {
-                    // Для открытой сети проверка не нужна
-                    if (network.encType == 0) {
-                      Navigator.pop(context, ''); // пустой пароль
-                    } else {
-                      if (formKey.currentState!.validate()) {
-                        Navigator.pop(context, passwordController.text);
-                      }
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    minimumSize: const Size(double.infinity, 50),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  child: Text(
-                    network.encType == 0
-                        ? 'Подключиться'
-                        : 'Подключиться с паролем',
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
-          ),
-        ),
-      ),
+            );
+          },
+        );
+      },
     );
 
     // Обработка результата
     if (result != null) {
-      // _connectToNetwork(network, result);
+      final password = result['password'] as String;
+      final ipType = result['ipType'] as String;
+
+      if (ipType == 'dhcp') {
+        _showConnectionConfirmDialog(network.ssid, () => _connectToNetwork(network, password));
+      } else {
+        final ip = result['ip'] as String;
+        final gateway = result['gateway'] as String;
+        final subnet = result['subnet'] as String;
+        _showConnectionConfirmDialog(network.ssid, () => _connectToNetworkStatic(network, password, ip, gateway, subnet));
+      }
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        duration: Duration(seconds: 4),
+      ),
+    );
+  }
+
+  void _showConnectionConfirmDialog(
+    String ssid,
+    Future<void> Function() connect,
+  ) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Подключение к Wi-Fi'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.wifi, size: 48, color: Colors.green),
+              const SizedBox(height: 16),
+              Text(
+                'Устройство будет подключено к сети "$ssid"',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'После изменения настроек устройство перезагрузится и появится в сети.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                await connect();
+                Navigator.pop(context);
+              },
+              child: const Text('OK'),
+            ),
+          ],
+        );
+      },
+    );
+  } 
+
+  Future<void> _connectToNetwork(WiFiInfo network, String password) async {
+    if (widget.deviceSettings != null) {
+      widget.deviceSettings!.wifi.client.ssid = network.ssid;
+      widget.deviceSettings!.wifi.client.password = password;
+      widget.deviceSettings!.wifi.client.skipAddress();
+      widget.deviceSettings!.wifi.client.skipGateway();
+      widget.deviceSettings!.wifi.client.skipSubnet();
+      widget.deviceSettings!.wifi.client.dhcp = true;
+
+      return postDeviceSettings(
+        host: widget.device.host,
+        deviceSettings: widget.deviceSettings!,
+      );
+    }
+  }
+
+  Future<void> _connectToNetworkStatic(
+    WiFiInfo network,
+    String password,
+    String ip,
+    String gateway,
+    String subnet,
+  ) async {
+    if (widget.deviceSettings != null) {
+      widget.deviceSettings!.wifi.client.ssid = network.ssid;
+      widget.deviceSettings!.wifi.client.password = password;
+      widget.deviceSettings!.wifi.client.setAddress(ip);
+      widget.deviceSettings!.wifi.client.setGateway(gateway);
+      widget.deviceSettings!.wifi.client.setSubnet(subnet);
+      widget.deviceSettings!.wifi.client.dhcp = false;
+
+      return postDeviceSettings(
+        host: widget.device.host,
+        deviceSettings: widget.deviceSettings!,
+      );
     }
   }
 }
