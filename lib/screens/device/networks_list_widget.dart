@@ -606,12 +606,18 @@ class _NetworksListState extends State<NetworksList> {
       final ipType = result['ipType'] as String;
 
       if (ipType == 'dhcp') {
-        _showConnectionConfirmDialog(network.ssid, () => _connectToNetwork(network, password));
+        _showConnectionConfirmDialog(
+          network.ssid,
+          () => _connectToNetwork(network, password),
+        );
       } else {
         final ip = result['ip'] as String;
         final gateway = result['gateway'] as String;
         final subnet = result['subnet'] as String;
-        _showConnectionConfirmDialog(network.ssid, () => _connectToNetworkStatic(network, password, ip, gateway, subnet));
+        _showConnectionConfirmDialog(
+          network.ssid,
+          () => _connectToNetworkStatic(network, password, ip, gateway, subnet),
+        );
       }
     }
   }
@@ -632,7 +638,7 @@ class _NetworksListState extends State<NetworksList> {
   ) {
     showDialog(
       context: context,
-      builder: (BuildContext context) {
+      builder: (BuildContext dialogContext) {
         return AlertDialog(
           title: const Text('Подключение к Wi-Fi'),
           content: Column(
@@ -655,16 +661,42 @@ class _NetworksListState extends State<NetworksList> {
           actions: [
             TextButton(
               onPressed: () async {
-                await connect();
-                Navigator.pop(context);
+                // Закрываем диалог подтверждения
+                Navigator.pop(dialogContext);
+
+                if (context.mounted) {
+                  Navigator.pop(context); // Закрываем BottomSheet
+
+                  // Выполняем подключение
+                  try {
+                    await connect();
+                   //Navigator.pop(context); // Закрываем страницу сетей
+                  } catch (cause) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Ошибка подключения: $cause'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                  }
+                }
               },
               child: const Text('OK'),
+            ),
+            TextButton(
+              onPressed: () {
+                // Просто закрываем диалог
+                Navigator.pop(dialogContext);
+              },
+              child: const Text('Отмена'),
             ),
           ],
         );
       },
     );
-  } 
+  }
 
   Future<void> _connectToNetwork(WiFiInfo network, String password) async {
     if (widget.deviceSettings != null) {

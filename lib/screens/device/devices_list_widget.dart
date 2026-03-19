@@ -9,7 +9,8 @@ import 'device_networks_page.dart';
 import 'dart:async';
 
 class DeviceList extends StatefulWidget {
-  const DeviceList({super.key});
+  final void Function(Device? device)? onDeviceSelected;
+  const DeviceList({super.key, this.onDeviceSelected});
 
   @override
   State<DeviceList> createState() => _DeviceListState();
@@ -157,8 +158,10 @@ class _DeviceListState extends State<DeviceList> {
         setState(() {
           if (_selectedDeviceId == device.id) {
             _selectedDeviceId = null;
+            widget.onDeviceSelected?.call(null);
           } else {
             _selectedDeviceId = device.id;
+            widget.onDeviceSelected?.call(device);
           }
         });
       },
@@ -218,10 +221,8 @@ class _DeviceListState extends State<DeviceList> {
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => DeviceNetworksPage(
-                device: device,
-                deviceSettings: settings,
-              ),
+              builder: (context) =>
+                  DeviceNetworksPage(device: device, deviceSettings: settings),
             ),
           );
         }
