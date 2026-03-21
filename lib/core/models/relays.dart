@@ -1,7 +1,7 @@
 // Модель для реле (ключа)
 class Relay {
   final String id; // уникальный идентификатор
-  final String name; // имя реле (например, "Свет", "Розетка")
+  String name; // имя реле (например, "Свет", "Розетка")
   bool state; // состояние: true = включено, false = выключено
   final int index;
 
