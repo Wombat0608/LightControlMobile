@@ -313,7 +313,6 @@ class _DeviceControlPageState extends State<DeviceControlPage> {
                           labelText: 'Имя реле',
                           hintText: 'Введите новое имя',
                           border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.edit),
                         ),
                         onSubmitted: (_) {
                           if (controller.text.isNotEmpty) {
