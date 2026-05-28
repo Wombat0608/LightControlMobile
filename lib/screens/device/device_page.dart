@@ -1,10 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:light_control/core/models/device.dart';
-import 'package:light_control/screens/qr_scanner/qr_scanner_page.dart';
+import 'package:light_control/screens/qr_scanner/qr_scanner.dart';
+
 import 'package:light_control/core/client/device_adapter.dart';
 import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
 import 'package:light_control/core/persistence/device_repository.dart';
 import 'package:uuid/uuid.dart';
+import 'package:lumi_qr_scanner/lumi_qr_scanner.dart';
+import 'package:wifi_iot/wifi_iot.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:device_info_plus/device_info_plus.dart';
+import 'dart:async';
+
+enum RequiredPermissions {
+  camera('Доступ к камере для сканирования QR'),
+  location('Для поиска Wi-Fi сетей'),
+  nearbyWifi('Для подключения к IoT-устройствам');
+
+  final String comment;
+  const RequiredPermissions(this.comment);
+}
 
 class DevicePage extends StatefulWidget {
   final Device? device;
@@ -16,6 +31,7 @@ class DevicePage extends StatefulWidget {
 }
 
 class _DevicePageState extends State<DevicePage> {
+  static const _defaultIPAddress = '192.168.4.1';
   late final TextEditingController ipController;
   late final TextEditingController nameController;
 
@@ -34,7 +50,7 @@ class _DevicePageState extends State<DevicePage> {
   @override
   void initState() {
     super.initState();
-    final initialIP = widget.device?.host ?? '192.168.4.1';
+    final initialIP = widget.device?.host ?? _defaultIPAddress;
     final initialName = widget.device?.name ?? 'Unknown';
     _handshaked = widget.device != null;
     device = widget.device;
@@ -211,24 +227,33 @@ class _DevicePageState extends State<DevicePage> {
   }
 
   Future<void> _scanQR() async {
-    final String? ipAddress = await Navigator.push(
+    final Barcode? barcode = await Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => QrScannerPage()),
+      MaterialPageRoute(builder: (context) => ScannerPage()),
     );
-    if (ipAddress == null) {
-      return;
-    }
-    if (!_isValidIP(ipAddress)) {
-      _showError("Содержимое QR не соответствует формату IP-адреса");
-      return;
-    }
-    if (mounted) {
-      setState(() {
-        ipController.text = ipAddress;
-      });
+
+    if (barcode?.valueType?.type == BarcodeValueTypeKind.text) {
+      String value = barcode?.rawValue ?? _defaultIPAddress;
+      if (!_isValidIP(value)) {
+        _showError("Содержимое QR не соответствует формату IP-адреса");
+        return;
+      }
+      if (mounted) {
+        setState(() {
+          ipController.text = value;
+        });
+      }
+    } else if (barcode?.valueType?.type == BarcodeValueTypeKind.wifi) {
+      // Если пользователь отсканировал QR код - проверяем необходимые разрешения для подключения IOT
+      final bool hasPermissions = await _checkAndRequestNetworkPermission();
+      if (hasPermissions) {
+        print(">>>>>> Все необходимые права есть!");
+      }
     }
   }
 
+  ///
+  ///
   Future<void> _handshakeDevice() async {
     setState(() {
       _check = true;
@@ -236,7 +261,7 @@ class _DevicePageState extends State<DevicePage> {
     try {
       device = await getDeviceDefinition(host: ipController.text);
       var deviceSettings = await getDeviceSettings(host: ipController.text);
-      
+
       if (!mounted) return;
       nameController.text = device!.name;
       setState(() {
@@ -280,5 +305,71 @@ class _DevicePageState extends State<DevicePage> {
         duration: Duration(seconds: 4),
       ),
     );
+  }
+
+  // Future<bool> _check
+
+  Future<bool> _checkAndRequestNetworkPermission() async {
+    final androidInfo = await DeviceInfoPlugin().androidInfo;
+    final isAndroid13OrAbove = androidInfo.version.sdkInt >= 33;
+
+    // Всегда запрашиваем и location, и nearbyWifiDevices
+    // На Android 13+ location не нужен, но его запрос не повредит (он не покажется)
+    List<Permission> permissionsToRequest = [
+      Permission.camera, // <-- ВАЖНО: добавьте камеру, если её нет
+      Permission.location,
+    ];
+
+    if (isAndroid13OrAbove) {
+      permissionsToRequest.add(Permission.nearbyWifiDevices);
+    }
+
+    // Запрашиваем разрешения
+    Map<Permission, PermissionStatus> statuses = await permissionsToRequest
+        .request();
+
+    // Проверяем, есть ли нужное разрешение для Wi-Fi
+    bool hasWifiPermission = isAndroid13OrAbove
+        ? (statuses[Permission.nearbyWifiDevices]?.isGranted ?? false)
+        : (statuses[Permission.location]?.isGranted ?? false);
+
+    // Если разрешения нет, показываем диалог
+    if (!hasWifiPermission) {
+      final shouldRetry = await _showRequestDeniedDialog();
+      if (shouldRetry) {
+        return _checkAndRequestNetworkPermission(); // Рекурсивный вызов снова запросит разрешения
+      }
+      return false;
+    }
+    return true;
+  }
+
+  Future<bool> _showRequestDeniedDialog() async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Необходимы разрешения'),
+          content: const Text(
+            'Для подключения к Wi-Fi сети требуется разрешение на определение местоположения.\n\n'
+            'Это требование безопасности Android для работы с локальными сетями.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Вернуться'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Попробовать снова'),
+            ),
+          ],
+        );
+      },
+    );
+
+    return result ??
+        false; // Если диалог был закрыт по-другому, считаем как false
   }
 }
