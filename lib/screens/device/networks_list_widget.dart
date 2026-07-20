@@ -9,7 +9,7 @@ class NetworksList extends StatefulWidget {
   final Device device;
   final DeviceSettings? deviceSettings;
 
-  NetworksList({super.key, required this.device, this.deviceSettings}) {}
+  NetworksList({super.key, required this.device, this.deviceSettings});
 
   @override
   State<NetworksList> createState() => _NetworksListState();

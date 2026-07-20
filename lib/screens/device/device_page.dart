@@ -11,14 +11,19 @@ import 'package:wifi_iot/wifi_iot.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'dart:async';
+import 'package:app_settings/app_settings.dart';
 
 enum RequiredPermissions {
-  camera('Доступ к камере для сканирования QR'),
-  location('Для поиска Wi-Fi сетей'),
-  nearbyWifi('Для подключения к IoT-устройствам');
+  camera('‣ Доступ к камере для сканирования QR', Permission.camera),
+  location('‣ Для поиска Wi-Fi сетей', Permission.location),
+  nearbyWifi(
+    '‣ Для подключения к IoT-устройствам',
+    Permission.nearbyWifiDevices,
+  );
 
   final String comment;
-  const RequiredPermissions(this.comment);
+  final Permission permission;
+  const RequiredPermissions(this.comment, this.permission);
 }
 
 class DevicePage extends StatefulWidget {
@@ -35,6 +40,11 @@ class _DevicePageState extends State<DevicePage> {
   late final TextEditingController ipController;
   late final TextEditingController nameController;
 
+  /*
+    Переменная для сохранения WiFi SSID сети, в которой ?находится? телефон ДО подключения к точке доступа IoT  
+  */
+  String? _previousWifiSSID;
+
   late final _ipMaskFormatter;
   Device? device;
 
@@ -44,7 +54,6 @@ class _DevicePageState extends State<DevicePage> {
 
   void _onIpChanged() {
     print('IP изменился: ${ipController.text}');
-    // Здесь можно делать валидацию или другие действия
   }
 
   @override
@@ -62,7 +71,6 @@ class _DevicePageState extends State<DevicePage> {
       filter: {"#": RegExp(r'[0-9]')},
       type: MaskAutoCompletionType.lazy,
     );
-    // Можно добавить listener если нужно
     ipController.addListener(_onIpChanged);
   }
 
@@ -86,12 +94,14 @@ class _DevicePageState extends State<DevicePage> {
         title: Text(pageTitle),
         actions: [
           PopupMenuButton<String>(
-            icon: Icon(Icons.more_vert), // вертикальное троеточие
+            icon: Icon(Icons.more_vert),
             color: Colors.white,
             elevation: 8,
             shape: RoundedRectangleBorder(),
             onSelected: (String result) {
-              // обработка
+              if (result == 'reconnect') {
+                _manualReconnect();
+              }
             },
             itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
               const PopupMenuItem<String>(
@@ -103,6 +113,11 @@ class _DevicePageState extends State<DevicePage> {
                 child: Text('Сканировать QR'),
               ),
               const PopupMenuDivider(),
+              if (_handshaked)
+                const PopupMenuItem<String>(
+                  value: 'reconnect',
+                  child: Text('Переподключиться'),
+                ),
               const PopupMenuItem<String>(
                 value: 'settings',
                 child: Text('Настройки'),
@@ -118,7 +133,6 @@ class _DevicePageState extends State<DevicePage> {
             mainAxisAlignment: MainAxisAlignment.start,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Поле для имени
               TextField(
                 controller: nameController,
                 readOnly: !_handshaked,
@@ -131,7 +145,6 @@ class _DevicePageState extends State<DevicePage> {
               ),
               const SizedBox(height: 16),
 
-              // Поле для IP-адреса
               Row(
                 children: [
                   Expanded(
@@ -151,8 +164,7 @@ class _DevicePageState extends State<DevicePage> {
                       },
                     ),
                   ),
-                  const SizedBox(width: 8), // Отступ между полем и кнопкой
-
+                  const SizedBox(width: 8),
                   IconButton(
                     onPressed: _scanQR,
                     tooltip: "Сканировать QR на устройстве",
@@ -183,17 +195,30 @@ class _DevicePageState extends State<DevicePage> {
 
               Visibility(
                 visible: _handshaked,
-                child: SizedBox(
-                  height: 50,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(4.0),
+                child: Column(
+                  children: [
+                    SizedBox(
+                      height: 50,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(4.0),
+                          ),
+                        ),
+                        onPressed: _saveDevice,
+                        child: const Text('Сохранить'),
                       ),
                     ),
-                    onPressed: _saveDevice,
-                    child: const Text('Сохранить'),
-                  ),
+                    const SizedBox(height: 8),
+                    TextButton.icon(
+                      onPressed: _manualReconnect,
+                      icon: const Icon(Icons.refresh, size: 16),
+                      label: const Text('Обновить подключение'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: Colors.orange,
+                      ),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 16),
@@ -226,48 +251,106 @@ class _DevicePageState extends State<DevicePage> {
     return regex.hasMatch(ip);
   }
 
+  ///
+  /// Открывает диалог QR-сканнера
+  ///
   Future<void> _scanQR() async {
+    final hasCameraPermission = await _checkAndRequestPermission([
+      RequiredPermissions.camera,
+    ]);
+    if (!hasCameraPermission || !mounted) return;
+
     final Barcode? barcode = await Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => ScannerPage()),
     );
+    if (barcode == null) {
+      return;
+    }
 
-    if (barcode?.valueType?.type == BarcodeValueTypeKind.text) {
-      String value = barcode?.rawValue ?? _defaultIPAddress;
+    // Простая задержка выполнения для окончательной инициализации QR-сканера
+    await Future.delayed(const Duration(milliseconds: 300));
+
+    // Если распознанный QR является plain text
+    if (barcode.valueType?.type == BarcodeValueTypeKind.text) {
+      String value = barcode.rawValue ?? _defaultIPAddress;
       if (!_isValidIP(value)) {
         _showError("Содержимое QR не соответствует формату IP-адреса");
         return;
       }
       if (mounted) {
-        setState(() {
-          ipController.text = value;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && ipController.text != value) {
+            setState(() {
+              ipController.text = value;
+            });
+            _handshakeDevice();
+          }
         });
       }
-    } else if (barcode?.valueType?.type == BarcodeValueTypeKind.wifi) {
-      // Если пользователь отсканировал QR код - проверяем необходимые разрешения для подключения IOT
-      final bool hasPermissions = await _checkAndRequestNetworkPermission();
-      if (hasPermissions) {
-        print(">>>>>> Все необходимые права есть!");
+      /*
+     Если распознанный QR является WiFi Connection String
+     Устройство находится в режиме IoT и предоставляет свою собственную точку доступа
+    */
+    } else if (barcode.valueType?.type == BarcodeValueTypeKind.wifi) {
+      final wifiData = barcode.valueType?.data;
+      if (wifiData == null) {
+        _showError("Не удалось извлечь данные Wi-Fi из QR-кода");
+        return;
+      }
+
+      final String ssid = wifiData["ssid"] ?? '';
+      final String password = wifiData["password"] ?? '';
+
+      if (ssid.isEmpty) {
+        _showError("QR-код не содержит SSID сети");
+        return;
+      }
+
+      final hasPermissions = await _checkAndRequestPermission([
+        RequiredPermissions.location,
+        RequiredPermissions.nearbyWifi,
+      ]);
+
+      if (!hasPermissions) {
+        _showError("Необходимые разрешения не предоставлены");
+        return;
+      }
+      final success = await _connectToWifiNetwork(ssid, password);
+      if (success && mounted) {
+        setState(() => _check = true);
+        await _handshakeDevice();
+        setState(() => _check = false);
       }
     }
   }
 
   ///
+  /// Выполняет первичный обмен с новым добавленным устройством и получает с него текущие настройки
   ///
   Future<void> _handshakeDevice() async {
     setState(() {
       _check = true;
     });
     try {
+      // TODO Необходимо в DeviceDefinition включить 
       device = await getDeviceDefinition(host: ipController.text);
       var deviceSettings = await getDeviceSettings(host: ipController.text);
-
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       nameController.text = device!.name;
+
+
+
+      // Перерисовка формы после получения данных с устройства IoT.
       setState(() {
         _check = false;
         _handshaked = true;
       });
+
+      
+
     } catch (cause) {
       if (!mounted) return;
       setState(() {
@@ -279,18 +362,24 @@ class _DevicePageState extends State<DevicePage> {
 
   Future<void> _saveDevice() async {
     final Device deviceToSave = Device(
-      id: device?.id ?? Uuid().v4(), // Генерируем ID для нового устройства
+      id: device?.id ?? Uuid().v4(),
       name: nameController.text,
       host: ipController.text,
     );
     if (widget.device == null) {
-      // Режим создания: добавляем новое устройство
       await DeviceRepository.instance.addDevice(deviceToSave);
     } else {
-      // Режим редактирования: обновляем существующее
       await DeviceRepository.instance.updateDevice(deviceToSave);
     }
     Navigator.pop(context, true);
+  }
+
+  Future<void> _manualReconnect() async {
+    setState(() {
+      _handshaked = false;
+      _check = false;
+    });
+    await _handshakeDevice();
   }
 
   void _showError(String message) {
@@ -307,54 +396,111 @@ class _DevicePageState extends State<DevicePage> {
     );
   }
 
-  // Future<bool> _check
-
-  Future<bool> _checkAndRequestNetworkPermission() async {
+  ///
+  ///  Выполняет контроль доступности необходимых систеных разрешений
+  ///
+  Future<bool> _checkAndRequestPermission(
+    List<RequiredPermissions> requiredPermissions,
+  ) async {
     final androidInfo = await DeviceInfoPlugin().androidInfo;
     final isAndroid13OrAbove = androidInfo.version.sdkInt >= 33;
 
-    // Всегда запрашиваем и location, и nearbyWifiDevices
-    // На Android 13+ location не нужен, но его запрос не повредит (он не покажется)
-    List<Permission> permissionsToRequest = [
-      Permission.camera, // <-- ВАЖНО: добавьте камеру, если её нет
-      Permission.location,
-    ];
+    List<Permission> permissionsToRequest = [];
+    List<RequiredPermissions> missingPermissions = [];
 
-    if (isAndroid13OrAbove) {
-      permissionsToRequest.add(Permission.nearbyWifiDevices);
+    for (var e in requiredPermissions) {
+      if (e.permission == Permission.location && isAndroid13OrAbove) {
+        continue;
+      }
+      if (e.permission == Permission.nearbyWifiDevices && !isAndroid13OrAbove) {
+        continue;
+      }
+
+      final status = await e.permission.status;
+      if (status.isGranted) {
+        continue;
+      }
+
+      if (status.isPermanentlyDenied) {
+        final shouldOpenSettings = await _showOpenSettingsDialog(e.comment);
+        if (shouldOpenSettings) {
+          await openAppSettings();
+        }
+        return false;
+      }
+
+      permissionsToRequest.add(e.permission);
+      missingPermissions.add(e);
     }
 
-    // Запрашиваем разрешения
-    Map<Permission, PermissionStatus> statuses = await permissionsToRequest
-        .request();
+    if (permissionsToRequest.isEmpty) {
+      return true;
+    }
 
-    // Проверяем, есть ли нужное разрешение для Wi-Fi
-    bool hasWifiPermission = isAndroid13OrAbove
-        ? (statuses[Permission.nearbyWifiDevices]?.isGranted ?? false)
-        : (statuses[Permission.location]?.isGranted ?? false);
+    final statuses = await permissionsToRequest.request();
 
-    // Если разрешения нет, показываем диалог
-    if (!hasWifiPermission) {
-      final shouldRetry = await _showRequestDeniedDialog();
+    bool allGranted = true;
+    for (var e in missingPermissions) {
+      if (!(statuses[e.permission]?.isGranted ?? false)) {
+        allGranted = false;
+        break;
+      }
+    }
+
+    if (!allGranted) {
+      final shouldRetry = await _showRequestDeniedDialog(missingPermissions);
       if (shouldRetry) {
-        return _checkAndRequestNetworkPermission(); // Рекурсивный вызов снова запросит разрешения
+        return _checkAndRequestPermission(requiredPermissions);
       }
       return false;
     }
+
     return true;
   }
 
-  Future<bool> _showRequestDeniedDialog() async {
+  ///
+  /// Отображает диалог для открытия доступа к необходимым системным разрешениям
+  /// для работы с камерой телефона (QR-сканером)
+  ///
+  Future<bool> _showOpenSettingsDialog(String permissionComment) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Разрешение заблокировано'),
+        content: Text(
+          '$permissionComment было навсегда заблокировано.\n\n'
+          'Пожалуйста, включите его в настройках приложения.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Отмена'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Открыть настройки'),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
+  }
+
+  ///
+  /// Отображает диалог с информацией о необходимых системных разрешениях для
+  /// работы с QR-сканнером (камерой телефона)
+  ///
+  Future<bool> _showRequestDeniedDialog(
+    List<RequiredPermissions> requiredPermissions,
+  ) async {
+    final contentText = requiredPermissions.map((e) => e.comment).join("\n");
     final result = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (BuildContext context) {
         return AlertDialog(
           title: const Text('Необходимы разрешения'),
-          content: const Text(
-            'Для подключения к Wi-Fi сети требуется разрешение на определение местоположения.\n\n'
-            'Это требование безопасности Android для работы с локальными сетями.',
-          ),
+          content: Text(contentText),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
@@ -369,7 +515,102 @@ class _DevicePageState extends State<DevicePage> {
       },
     );
 
-    return result ??
-        false; // Если диалог был закрыт по-другому, считаем как false
+    return result ?? false;
+  }
+
+  ///
+  /// Выполняет подключение к точке доступа WiFi, предоставленное IoT устройством
+  ///
+  Future<bool> _connectToWifiNetwork(String ssid, String password) async {
+    if (!mounted) return false;
+    setState(() => _check = true);
+
+    /*
+      Фиксируем текущее WiFi соединение
+    */
+    _previousWifiSSID = await WiFiForIoTPlugin.getSSID();
+
+    try {
+      final connected = await WiFiForIoTPlugin.connect(
+        ssid,
+        password: password,
+        security: NetworkSecurity.WPA,
+        withInternet: false,
+        timeoutInSeconds: 30,
+      );
+
+      if (!connected) {
+        _showError("Не удалось подключиться к сети $ssid");
+        return false;
+      }
+
+      await WiFiForIoTPlugin.forceWifiUsage(true);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Подключено к Wi-Fi сети'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+
+      return true;
+    } catch (e) {
+      if (mounted) _showError("Ошибка подключения: $e");
+      return false;
+    } finally {
+      if (mounted) setState(() => _check = false);
+    }
+  }
+
+  ///
+  /// Выполняет подключение к предыдущей Wi-Fi сети, после отключения от Wi-Fi IoT
+  ///
+  Future<void> _restorePreviousWifi() async {
+    // Если была предыдущая сеть — подключаемся к ней
+    if (_previousWifiSSID != null && _previousWifiSSID!.isNotEmpty) {
+      // Пробуем подключиться к предыдущей сети
+      final connected = await WiFiForIoTPlugin.connect(
+        _previousWifiSSID!,
+        password: '', // Пустой пароль — система использует сохранённые данные
+        withInternet: true,
+        timeoutInSeconds: 30,
+      );
+      if (connected && mounted) {
+        return;
+      }
+    }
+
+    // Если не удалось вернуться к предыдущей сети — предлагаем выбрать вручную
+    if (mounted) {
+      final shouldSelectManually =
+          await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Подключение к Wi-Fi'),
+              content: const Text(
+                'Не удалось автоматически вернуться к предыдущей сети.\n'
+                'Хотите выбрать сеть вручную?',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Позже'),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Выбрать...'),
+                ),
+              ],
+            ),
+          ) ??
+          false;
+
+      if (shouldSelectManually) {
+        // Открываем системные настройки Wi-await 
+        AppSettings.openAppSettings(type: AppSettingsType.wifi);
+      }
+    }
   }
 }

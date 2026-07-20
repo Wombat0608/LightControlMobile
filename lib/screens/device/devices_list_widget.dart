@@ -72,7 +72,7 @@ class _DeviceListState extends State<DeviceList> {
       if (mounted) {
         setState(() {
           _deviceSettings[deviceId] = DeviceSettingsCache(
-            deviceSettings: settings[0] as DeviceSettings,
+            deviceSettings: settings[0],
             lastUpdated: DateTime.now(),
           );
         });

@@ -1,7 +1,7 @@
 extension IntFormatting on int {
   String toDigits(int width) {
     final isNegative = this < 0;
-    final absoluteValue = this.abs();
+    final absoluteValue = abs();
     final formatted = absoluteValue.toString().padLeft(width - (isNegative ? 1 : 0), '0');
     return isNegative ? '-$formatted' : formatted;
   }
@@ -80,6 +80,7 @@ class WiFi {
     }
     return apm.parse(input, pos);
   }
+
 }
 
 class Network {

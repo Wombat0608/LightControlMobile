@@ -10,14 +10,16 @@ class ScannerPage extends StatefulWidget {
 
 class _ScannerPageState extends State<ScannerPage> {
   QRScannerController? _controller;
+  bool _isProcessing = false;
 
   @override
   void initState() {
     super.initState();
 
     // Создаём конфигурацию и передаём её в контроллер
-    final config =
-        ScannerConfig(autoFocus: true); // можно настроить параметры при необходимости
+    final config = ScannerConfig(
+      autoFocus: true,
+    ); // можно настроить параметры при необходимости
     _controller = QRScannerController(config: config);
   }
 
@@ -36,7 +38,16 @@ class _ScannerPageState extends State<ScannerPage> {
           // Теперь можно управлять камерой
         },
         onBarcodeScanned: (barcode) {
-          Navigator.pop(context, barcode);
+          if (_isProcessing) {
+            return;
+          }
+          _isProcessing = true;
+          _controller?.stopScanning();
+          try {
+            Navigator.pop(context, barcode);
+          } catch (cause) {
+            _isProcessing = false;
+          }
         },
         // Настройка внешнего вида (опционально)
         overlayConfig: ScannerOverlayConfig(

@@ -138,7 +138,7 @@ class _DeviceControlPageState extends State<DeviceControlPage> {
                   relay.state = !relay.state;
                 });
               },
-              activeColor: Colors.green,
+              activeThumbColor: Colors.green,
             ),
           ],
         ),
