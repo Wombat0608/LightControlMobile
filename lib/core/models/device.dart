@@ -8,6 +8,8 @@ class Device extends Equatable {
   final String host;
   final int port;
 
+  late int wifiMode;
+
   final List<Relay> relays = [
     Relay(id: '_relay0', name: 'Реле 0', index: 0, state: false),
     Relay(id: '_relay1', name: 'Реле 1', index: 1, state: true),

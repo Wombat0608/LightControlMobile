@@ -1,6 +1,7 @@
 import 'package:http/http.dart' as http;
 import 'package:light_control/core/models/device.dart';
 import 'package:light_control/core/models/wi_fi_info.dart';
+import 'package:light_control/core/models/device_info.dart';
 import 'package:light_control/core/models/device_settings.dart';
 import 'package:sprintf/sprintf.dart';
 import 'dart:async';
@@ -101,11 +102,14 @@ Future<Device> getDeviceDefinition({
         },
       );
   if (response.statusCode == 200) {
+    dynamic json = jsonDecode(response.body);
+    DeviceInfo deviceInfo  = DeviceInfo.fromMap(json);
     final Device d = Device(
       id: const Uuid().v4(),
-      name: response.body,
+      name: deviceInfo.deviceName,
       host: host,
     );
+    d.wifiMode = deviceInfo.wifiMode;
     return d;
   } else {
     throw Exception('Невозможно подключиться к устройству.');

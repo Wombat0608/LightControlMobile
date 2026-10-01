@@ -333,7 +333,8 @@ class _DevicePageState extends State<DevicePage> {
       _check = true;
     });
     try {
-      // TODO Необходимо в DeviceDefinition включить 
+      // TODO Необходимо в DeviceDefinition включить тип сети (Client или точка доступа)
+
       device = await getDeviceDefinition(host: ipController.text);
       var deviceSettings = await getDeviceSettings(host: ipController.text);
       if (!mounted) {
